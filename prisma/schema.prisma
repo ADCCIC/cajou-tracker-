@@ -1,0 +1,203 @@
+// Prisma schema for Cajou Tracker - Côte d'Ivoire Cashew Export Application
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum ProductType {
+  RCN // Raw Cashew Nuts (noix brutes)
+  KERNEL // Amandes décortiquées
+}
+
+enum PriceType {
+  FARMGATE // Prix bord-champ
+  FOB // Free On Board
+  CIF // Cost, Insurance, Freight
+}
+
+enum FlowType {
+  EXPORT
+  IMPORT
+}
+
+enum DataSource {
+  MANUAL // Saisie manuelle
+  FAOSTAT // FAO Statistics
+  COMTRADE // UN Comtrade
+  TRIDGE // Tridge platform
+  COMMODITIES // Commodities-API
+  CCA // Conseil Coton Anacarde
+}
+
+enum AlertCondition {
+  ABOVE // Prix au-dessus du seuil
+  BELOW // Prix en-dessous du seuil
+  CHANGE_PERCENT // Variation en pourcentage
+}
+
+// User model for authentication
+model User {
+  id        String       @id @default(cuid())
+  email     String       @unique
+  name      String?
+  password  String?
+  role      String       @default("user")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  alerts    PriceAlert[]
+  uploads   DataUpload[]
+}
+
+// Price entries for RCN and Kernels
+model PriceEntry {
+  id          String      @id @default(cuid())
+  date        DateTime    @db.Date
+  productType ProductType
+  priceType   PriceType
+  priceUsd    Decimal     @db.Decimal(12, 2)
+  priceFcfa   Decimal?    @db.Decimal(15, 2)
+  grade       String? // WW180, WW240, WW320, WW450, etc.
+  origin      String? // Country of origin
+  destination String? // Destination country
+  source      DataSource
+  notes       String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([date])
+  @@index([productType])
+  @@index([priceType])
+  @@index([source])
+}
+
+// Trade data from FAOSTAT and Comtrade
+model TradeData {
+  id            String      @id @default(cuid())
+  year          Int
+  month         Int? // null for annual data
+  hsCode        String // "080131" (RCN) or "080132" (Kernels)
+  productType   ProductType
+  flowType      FlowType
+  reporterCode  String // UN M49 code (384 = Côte d'Ivoire)
+  reporterName  String
+  partnerCode   String? // Trade partner code
+  partnerName   String? // Trade partner name
+  tradeValueUsd Decimal     @db.Decimal(15, 2)
+  netWeightKg   Decimal?    @db.Decimal(15, 2)
+  quantity      Decimal?    @db.Decimal(15, 2)
+  quantityUnit  String?
+  source        DataSource
+  rawData       Json? // Original API response
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([year, month, hsCode, flowType, reporterCode, partnerCode, source])
+  @@index([year])
+  @@index([productType])
+  @@index([reporterCode])
+  @@index([partnerCode])
+}
+
+// Production data from FAOSTAT
+model ProductionData {
+  id          String      @id @default(cuid())
+  year        Int
+  countryCode String // FAO country code
+  countryName String
+  productType ProductType
+  production  Decimal?    @db.Decimal(15, 2) // tonnes
+  area        Decimal?    @db.Decimal(15, 2) // hectares
+  yield       Decimal?    @db.Decimal(10, 4) // tonnes/ha
+  source      DataSource
+  rawData     Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([year, countryCode, productType, source])
+  @@index([year])
+  @@index([countryCode])
+}
+
+// Price alerts configuration
+model PriceAlert {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productType    ProductType
+  priceType      PriceType?
+  grade          String?
+  condition      AlertCondition
+  thresholdValue Decimal        @db.Decimal(12, 2)
+  isActive       Boolean        @default(true)
+  notifyEmail    Boolean        @default(true)
+  notifySms      Boolean        @default(false)
+  phoneNumber    String?
+  lastTriggered  DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([productType])
+}
+
+// Alert history
+model AlertHistory {
+  id          String   @id @default(cuid())
+  alertId     String
+  priceValue  Decimal  @db.Decimal(12, 2)
+  triggeredAt DateTime @default(now())
+  notified    Boolean  @default(false)
+
+  @@index([alertId])
+  @@index([triggeredAt])
+}
+
+// Data uploads tracking
+model DataUpload {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename     String
+  fileType     String // CSV, XLSX
+  fileSize     Int
+  recordsCount Int?
+  status       String    @default("pending") // pending, processing, completed, failed
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  processedAt  DateTime?
+
+  @@index([userId])
+  @@index([status])
+}
+
+// Cache for external API responses
+model ApiCache {
+  id        String     @id @default(cuid())
+  key       String     @unique
+  data      Json
+  source    DataSource
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+
+  @@index([key])
+  @@index([expiresAt])
+}
+
+// Exchange rates (USD/FCFA)
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  usdToFcfa Decimal  @db.Decimal(10, 4)
+  source    String
+  createdAt DateTime @default(now())
+
+  @@unique([date])
+  @@index([date])
+}

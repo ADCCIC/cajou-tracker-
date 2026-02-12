@@ -5,7 +5,7 @@ export {
   FlowType,
   DataSource,
   AlertCondition,
-} from "@/generated/prisma";
+} from "@prisma/client";
 
 // Country codes reference
 export const COUNTRY_CODES = {
